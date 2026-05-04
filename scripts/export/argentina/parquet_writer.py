@@ -1,8 +1,8 @@
 """Write Argentina destination tables to Parquet via pure DuckDB SQL.
 
-`wells.parquet` and `well_operator_history.parquet` are emitted as
-single files. Later issues add `well_events.parquet` and the
-hive-partitioned `monthly_production/anio=YYYY/data.parquet` tree.
+`wells.parquet`, `well_operator_history.parquet`, and
+`well_events.parquet` are emitted as single files. The next issue adds
+the hive-partitioned `monthly_production/anio=YYYY/data.parquet` tree.
 """
 
 from pathlib import Path
@@ -24,3 +24,10 @@ def write_operator_history(con: duckdb.DuckDBPyConnection, output_dir: Path) -> 
     con.execute(
         f"COPY (SELECT * FROM well_operator_history) TO '{target}' (FORMAT PARQUET)"
     )
+
+
+def write_well_events(con: duckdb.DuckDBPyConnection, output_dir: Path) -> None:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target = output_dir / "well_events.parquet"
+    con.execute(f"COPY (SELECT * FROM well_events) TO '{target}' (FORMAT PARQUET)")

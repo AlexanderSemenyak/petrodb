@@ -1,8 +1,8 @@
 """Unit tests for the Argentina export validator.
 
-Exercises the WKB-parseability and operator-history FK invariants.
-Later issues add PK uniqueness, additional FK checks, date
-completeness, partition counts.
+Exercises the WKB-parseability, operator-history FK, and well-events
+FK invariants. Later issues add PK uniqueness, additional FK checks,
+date completeness, partition counts.
 """
 
 from datetime import date
@@ -39,10 +39,25 @@ def _make_wells_with_geom(
         )
         """
     )
+    con.execute(
+        """
+        CREATE OR REPLACE TABLE well_events (
+            idpozo INTEGER,
+            event_date DATE,
+            tipoestado VARCHAR,
+            tipoextraccion VARCHAR,
+            tipopozo VARCHAR
+        )
+        """
+    )
 
 
 def _seed_operator_history(con: duckdb.DuckDBPyConnection, rows: list[tuple]) -> None:
     con.executemany("INSERT INTO well_operator_history VALUES (?, ?, ?, ?, ?)", rows)
+
+
+def _seed_well_events(con: duckdb.DuckDBPyConnection, rows: list[tuple]) -> None:
+    con.executemany("INSERT INTO well_events VALUES (?, ?, ?, ?, ?)", rows)
 
 
 def test_validator_passes_on_valid_wkb():
@@ -93,6 +108,57 @@ def test_operator_history_fk_raises_on_orphan_idpozo():
 
 
 def test_operator_history_fk_passes_when_history_empty():
+    con = duckdb.connect()
+    _make_wells_with_geom(con, [VALID_WKB_HEX])
+    validator.validate(con)
+
+
+def test_well_events_fk_passes_when_all_idpozos_in_wells():
+    con = duckdb.connect()
+    _make_wells_with_geom(con, [VALID_WKB_HEX, VALID_WKB_HEX])
+    _seed_well_events(
+        con,
+        [
+            (
+                1,
+                date(2006, 1, 1),
+                "Extracción Efectiva",
+                "Bombeo Mecánico",
+                "Petrolífero",
+            ),
+            (
+                2,
+                date(2006, 1, 1),
+                "Extracción Efectiva",
+                "Surgencia Natural",
+                "Gasífero",
+            ),
+        ],
+    )
+    validator.validate(con)
+
+
+def test_well_events_fk_raises_on_orphan_idpozo():
+    con = duckdb.connect()
+    _make_wells_with_geom(con, [VALID_WKB_HEX])  # idpozo 1 only
+    _seed_well_events(
+        con,
+        [
+            (
+                1,
+                date(2006, 1, 1),
+                "Extracción Efectiva",
+                "Bombeo Mecánico",
+                "Petrolífero",
+            ),
+            (999, date(2006, 1, 1), "Abandonado", "Surgencia Natural", "Gasífero"),
+        ],
+    )
+    with pytest.raises(validator.FKIntegrityError, match="well_events"):
+        validator.validate(con)
+
+
+def test_well_events_fk_passes_when_events_empty():
     con = duckdb.connect()
     _make_wells_with_geom(con, [VALID_WKB_HEX])
     validator.validate(con)

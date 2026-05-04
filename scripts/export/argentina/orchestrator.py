@@ -1,8 +1,8 @@
 """Argentina export-phase orchestrator.
 
 Validates the intermediate DB unconditionally, then writes the published
-Parquets. `wells.parquet` and `well_operator_history.parquet` are
-emitted; later issues add `well_events.parquet` and the
+Parquets. `wells.parquet`, `well_operator_history.parquet`, and
+`well_events.parquet` are emitted; the next issue adds the
 hive-partitioned `monthly_production` tree.
 """
 
@@ -21,3 +21,4 @@ def run(db_path: Path, output_dir: Path) -> None:
         validator.validate(con)
         parquet_writer.write_wells(con, output_dir)
         parquet_writer.write_operator_history(con, output_dir)
+        parquet_writer.write_well_events(con, output_dir)

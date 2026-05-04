@@ -1,14 +1,15 @@
 """Pre-publish validation hook for the Argentina export.
 
-Invoked unconditionally before parquet writes. Enforces two of the six
-PRD invariants:
+Invoked unconditionally before parquet writes. Enforces three of the
+six PRD invariants:
 
 1. Every non-NULL `geom` in `wells` parses as valid WKB.
 2. Every `idpozo` in `well_operator_history` exists in `wells` (FK).
+3. Every `idpozo` in `well_events` exists in `wells` (FK).
 
 Later issues add PK uniqueness on (idpozo, fecha), FK integrity for
-`well_events` and `monthly_production`, date completeness, partition
-counts, and the 50 MB soft-warn.
+`monthly_production`, date completeness, partition counts, and the
+50 MB soft-warn.
 
 Failure raises and aborts the export. Parquets are never written on a
 failed validation.
@@ -24,6 +25,7 @@ class FKIntegrityError(Exception):
 def validate(con: duckdb.DuckDBPyConnection) -> None:
     _validate_wkb_parseable(con)
     _validate_operator_history_fk(con)
+    _validate_well_events_fk(con)
 
 
 def _validate_wkb_parseable(con: duckdb.DuckDBPyConnection) -> None:
@@ -58,4 +60,19 @@ def _validate_operator_history_fk(con: duckdb.DuckDBPyConnection) -> None:
     if orphans:
         raise FKIntegrityError(
             f"well_operator_history has {orphans} idpozo value(s) absent from wells"
+        )
+
+
+def _validate_well_events_fk(con: duckdb.DuckDBPyConnection) -> None:
+    """Every `idpozo` in `well_events` must exist in `wells`."""
+    orphans = con.execute(
+        """
+        SELECT COUNT(DISTINCT e.idpozo)
+        FROM well_events e
+        ANTI JOIN wells w ON e.idpozo = w.idpozo
+        """
+    ).fetchone()[0]
+    if orphans:
+        raise FKIntegrityError(
+            f"well_events has {orphans} idpozo value(s) absent from wells"
         )

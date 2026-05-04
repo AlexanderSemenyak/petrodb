@@ -1,8 +1,8 @@
 """Argentina transform-phase orchestrator.
 
 Stages source CSVs into the DuckDB intermediate, then builds the
-destination tables. `wells` and `well_operator_history` are built;
-later issues add `well_events` and `monthly_production`.
+destination tables. `wells`, `well_operator_history`, and `well_events`
+are built; the next issue adds `monthly_production`.
 """
 
 from pathlib import Path
@@ -11,6 +11,7 @@ import duckdb
 
 from scripts.transform.argentina import (
     csv_stager,
+    events_builder,
     operator_history_builder,
     wells_builder,
 )
@@ -24,3 +25,4 @@ def run(db_path: Path, csv_dir: Path) -> None:
         csv_stager.stage(con, csv_dir)
         wells_builder.build(con)
         operator_history_builder.build(con)
+        events_builder.build(con)

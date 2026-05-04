@@ -101,6 +101,42 @@ def test_pipeline_emits_wells_parquet(tmp_path: Path) -> None:
     ]
     assert well_1002_codes == ["Z001", "APEA"]
 
+    # well_events.parquet — every producing well emits its initial state;
+    # 1003 additionally flaps tipoestado Ee → Pt (2007-01) → Ee (2007-02),
+    # so it carries three events. Orphan 1004 has no production rows and
+    # therefore contributes no events.
+    events_parquet = out_dir / "well_events.parquet"
+    assert events_parquet.exists(), "well_events.parquet was not written"
+    events_per_well = dict(
+        con.execute(
+            f"""
+            SELECT idpozo, COUNT(*)
+            FROM read_parquet('{events_parquet}')
+            GROUP BY idpozo
+            ORDER BY idpozo
+            """
+        ).fetchall()
+    )
+    assert events_per_well == {1001: 1, 1002: 1, 1003: 3, 1005: 1, 1006: 1}
+
+    # 1003's three events in order — initial, flap-out, flap-back.
+    well_1003_states = [
+        row[0]
+        for row in con.execute(
+            f"""
+            SELECT tipoestado
+            FROM read_parquet('{events_parquet}')
+            WHERE idpozo = 1003
+            ORDER BY event_date
+            """
+        ).fetchall()
+    ]
+    assert well_1003_states == [
+        "Extracción Efectiva",
+        "Parado Transitoriamente",
+        "Extracción Efectiva",
+    ]
+
 
 def test_export_aborts_when_validator_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
