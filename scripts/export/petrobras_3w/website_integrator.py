@@ -62,21 +62,28 @@ def _readme_payload() -> str:
 ### Petrobras 3W Dataset
 Labelled 1-Hz sensor-data windows from the Petrobras 3W dataset, sliced
 into per-Instance Parquet files. Pinned at upstream git tag `{PIN_GIT_TAG}`
-(dataset version `{PIN_DATASET_VERSION}`). This initial release publishes
-the event-class lookup and documentation scaffolding; the Instance catalog,
-real-Well master, and Observations time-series ship in follow-up issues.
+(dataset version `{PIN_DATASET_VERSION}`). This release publishes the
+event-class lookup and the full Instance catalog; the real-Well master and
+Observations time-series ship in follow-up issues.
 
-List every event class (NORMAL plus the nine anomaly categories) with their
-TRANSIENT-arc semantics:
+Measure the labelled-data balance across the corpus from the catalog alone
+(no Observations scan needed):
 
 ```python
 import duckdb
 
-result = duckdb.sql(\"\"\"
-    SELECT event_class, name, description,
-           has_transient, transient_code
-    FROM 'https://dev-petrodb.ocortez.com/petrobras_3w/event_types.parquet'
-    ORDER BY event_class
+base = 'https://dev-petrodb.ocortez.com/petrobras_3w'
+result = duckdb.sql(f\"\"\"
+    SELECT
+        et.event_class,
+        et.description,
+        COUNT(*)             AS n_instances,
+        SUM(i.n_rows)        AS n_observations
+    FROM '{{base}}/instances.parquet' i
+    JOIN '{{base}}/event_types.parquet' et
+        ON et.event_class = i.event_class
+    GROUP BY et.event_class, et.description
+    ORDER BY et.event_class
 \"\"\").df()
 ```
 
@@ -102,7 +109,7 @@ def _index_tab_button_payload() -> str:
     return """\
             <button class="tab-button" data-tab="petrobras_3w">
                 Petrobras 3W
-                <span class="tab-count">1 file</span>
+                <span class="tab-count">2 files</span>
             </button>
 """
 
@@ -117,14 +124,18 @@ def _index_tab_content_payload() -> str:
                 <p style="margin-bottom: 24px; color: var(--text-secondary);">
                     Labelled 1-Hz sensor-data windows from the Petrobras 3W dataset.
                     Pinned at upstream git tag <code>{PIN_GIT_TAG}</code>
-                    (dataset version <code>{PIN_DATASET_VERSION}</code>). This initial
-                    release publishes the event-class lookup and documentation
-                    scaffolding; the Instance catalog, real-Well master, and
-                    Observations time-series ship in follow-up issues.
+                    (dataset version <code>{PIN_DATASET_VERSION}</code>). This release
+                    publishes the event-class lookup and the full Instance catalog;
+                    the real-Well master and Observations time-series ship in follow-up
+                    issues.
                 </p>
                 <div class="download-grid">
                     <a href="petrobras_3w/event_types.parquet" class="download-button" download>
                         <span>event_types.parquet</span>
+                        <span class="download-icon">⬇</span>
+                    </a>
+                    <a href="petrobras_3w/instances.parquet" class="download-button" download>
+                        <span>instances.parquet</span>
                         <span class="download-icon">⬇</span>
                     </a>
                 </div>
@@ -151,7 +162,7 @@ def _index_tab_content_payload() -> str:
                         <span class="download-icon">📄</span>
                     </a>
                 </div>
-                <p class="file-size">One lookup table · pinned upstream identity logged on every publish</p>
+                <p class="file-size">One lookup table + Instance catalog · pinned upstream identity logged on every publish</p>
             </div>
 
             <!-- About Section -->
@@ -179,7 +190,8 @@ def _index_tab_content_payload() -> str:
             <section>
                 <h2>Quick Start with DuckDB</h2>
                 <p>
-                    List every event class with its TRANSIENT-arc semantics:
+                    Measure the labelled-data balance across the corpus from the
+                    Instance catalog alone (no Observations scan needed):
                 </p>
                 <div class="code-block">
                     <div class="code-header">
@@ -189,19 +201,24 @@ def _index_tab_content_payload() -> str:
                     </div>
                     <pre><span class="keyword">import</span> duckdb
 
-<span class="comment"># List the 10 event classes and their TRANSIENT-arc semantics</span>
-result = duckdb.<span class="function">sql</span>(<span class="string">\"\"\"
-    SELECT event_class, name, description,
-           has_transient, transient_code
-    FROM 'petrobras_3w/event_types.parquet'
-    ORDER BY event_class
+base = <span class="string">'https://dev-petrodb.ocortez.com/petrobras_3w'</span>
+result = duckdb.<span class="function">sql</span>(<span class="function">f</span><span class="string">\"\"\"
+    SELECT
+        et.event_class,
+        et.description,
+        COUNT(*)             AS n_instances,
+        SUM(i.n_rows)        AS n_observations
+    FROM '{{base}}/instances.parquet' i
+    JOIN '{{base}}/event_types.parquet' et
+        ON et.event_class = i.event_class
+    GROUP BY et.event_class, et.description
+    ORDER BY et.event_class
 \"\"\"</span>).<span class="function">df</span>()</pre>
                 </div>
                 <p>
-                    More canonical patterns (per-event-class filter, joins
-                    against the Instance catalog, single-Instance fetch)
-                    will land alongside the catalog and Observations files
-                    in follow-up releases.
+                    More canonical patterns (single-Instance fetch, per-Well
+                    cross-validation splits) will land alongside the Observations
+                    files in follow-up releases.
                 </p>
             </section>
 

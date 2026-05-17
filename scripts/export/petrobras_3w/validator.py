@@ -2,19 +2,26 @@
 
 Invoked unconditionally before parquet writes. The full set of nine
 invariants from CONTEXT.md (`Petrobras 3W dataset — pre-publish
-validation`) gets filled in across subsequent slices as more tables
-are added. This slice covers the structural checks that apply once
-`event_types` exists:
+validation`) gets filled in across subsequent slices as more tables are
+added. This slice covers:
 
+`event_types` (from #19):
 - `event_types.event_class` is the PK and is unique.
-- `event_types` has exactly 10 rows (one per upstream `[…]` event
-  section). The PRD pins this row count, so a count mismatch indicates
-  upstream drift and aborts publish.
-- `has_transient = false` exactly for event_classes {0, 3, 4}, matching
-  the upstream TRANSIENT flags. The validator catches a future upstream
-  toggle as a hard failure rather than silently mutating published bytes.
+- `event_types` has exactly 10 rows.
+- `has_transient = false` exactly for event_classes {0, 3, 4}.
 - `transient_code = event_class + 100` when `has_transient = true`,
   NULL otherwise.
+
+`instances` (#20):
+- `instance_id` is unique (rule 1 from CONTEXT.md).
+- Every `event_class` exists in `event_types` (rule 4 — FK integrity).
+- `well_kind` is one of `{real, simulated, drawn}`; `well_id` is
+  non-NULL iff `well_kind = real` (matches the well-kind contract in
+  CONTEXT.md's Language section).
+- `n_rows_transient` is NULL exactly when the row's `event_class` has
+  `has_transient = false` in `event_types`.
+- The four `n_rows_*` columns sum to `n_rows` for every row (treating
+  the NULL `n_rows_transient` as zero).
 
 Also emits the pinned upstream identity (git tag + dataset version) to
 the validation log so consumers reading export output can verify the
@@ -35,6 +42,7 @@ from scripts.transform.petrobras_3w.upstream_stager import DatasetIni
 
 EXPECTED_EVENT_TYPES_COUNT = 10
 NON_TRANSIENT_EVENT_CLASSES = (0, 3, 4)
+VALID_WELL_KINDS = ("real", "simulated", "drawn")
 
 
 class EventTypeCountError(Exception):
@@ -51,6 +59,28 @@ class EventTypePkError(Exception):
 
 class UpstreamDatasetVersionError(Exception):
     """Parsed `dataset.ini` reports a version that does not match the pin."""
+
+
+class InstancePkError(Exception):
+    """`instances.instance_id` has duplicate rows (rule 1)."""
+
+
+class InstanceEventClassFkError(Exception):
+    """`instances.event_class` references a row not in `event_types` (rule 4)."""
+
+
+class InstanceWellKindError(Exception):
+    """`well_kind` is outside `{real, simulated, drawn}` or `well_id` does
+    not match the well-kind contract (non-NULL iff `well_kind = real`)."""
+
+
+class InstanceTransientNullnessError(Exception):
+    """`n_rows_transient` nullness does not match `event_types.has_transient`."""
+
+
+class InstanceRowCountAccountingError(Exception):
+    """`n_rows_warmup_null + n_rows_normal + n_rows_transient + n_rows_steady`
+    does not equal `n_rows` for at least one Instance."""
 
 
 def log_pinned_upstream(
@@ -86,6 +116,11 @@ def validate(
     _validate_event_types_row_count(con)
     _validate_event_types_pk(con)
     _validate_event_types_transient(con)
+    _validate_instances_pk(con)
+    _validate_instances_event_class_fk(con)
+    _validate_instances_well_kind(con)
+    _validate_instances_transient_nullness(con)
+    _validate_instances_row_count_accounting(con)
 
 
 def _validate_event_types_row_count(con: duckdb.DuckDBPyConnection) -> None:
@@ -142,4 +177,96 @@ def _validate_event_types_transient(con: duckdb.DuckDBPyConnection) -> None:
     if bad_codes:
         raise EventTypeTransientError(
             f"event_types has {bad_codes} row(s) with inconsistent transient_code"
+        )
+
+
+def _validate_instances_pk(con: duckdb.DuckDBPyConnection) -> None:
+    duplicate_groups = con.execute(
+        """
+        SELECT COUNT(*) FROM (
+            SELECT instance_id
+            FROM instances
+            GROUP BY instance_id
+            HAVING COUNT(*) > 1
+        )
+        """
+    ).fetchone()[0]
+    if duplicate_groups:
+        raise InstancePkError(
+            f"instances has {duplicate_groups} duplicate instance_id value(s)"
+        )
+
+
+def _validate_instances_event_class_fk(con: duckdb.DuckDBPyConnection) -> None:
+    orphans = con.execute(
+        """
+        SELECT COUNT(*) FROM instances i
+        LEFT JOIN event_types et ON et.event_class = i.event_class
+        WHERE et.event_class IS NULL
+        """
+    ).fetchone()[0]
+    if orphans:
+        raise InstanceEventClassFkError(
+            f"instances has {orphans} row(s) whose event_class is not in event_types"
+        )
+
+
+def _validate_instances_well_kind(con: duckdb.DuckDBPyConnection) -> None:
+    bad_kind = con.execute(
+        f"""
+        SELECT COUNT(*) FROM instances
+        WHERE well_kind NOT IN {VALID_WELL_KINDS}
+        """
+    ).fetchone()[0]
+    if bad_kind:
+        raise InstanceWellKindError(
+            f"instances has {bad_kind} row(s) with well_kind outside "
+            f"{list(VALID_WELL_KINDS)}"
+        )
+    # `well_id` is non-NULL iff `well_kind = 'real'`.
+    bad_well_id = con.execute(
+        """
+        SELECT COUNT(*) FROM instances
+        WHERE (well_kind = 'real'     AND well_id IS NULL)
+           OR (well_kind <> 'real'    AND well_id IS NOT NULL)
+        """
+    ).fetchone()[0]
+    if bad_well_id:
+        raise InstanceWellKindError(
+            f"instances has {bad_well_id} row(s) where well_id nullness does "
+            f"not match the well-kind contract (non-NULL iff well_kind = 'real')"
+        )
+
+
+def _validate_instances_transient_nullness(con: duckdb.DuckDBPyConnection) -> None:
+    mismatches = con.execute(
+        """
+        SELECT COUNT(*) FROM instances i
+        JOIN event_types et ON et.event_class = i.event_class
+        WHERE (et.has_transient = true  AND i.n_rows_transient IS NULL)
+           OR (et.has_transient = false AND i.n_rows_transient IS NOT NULL)
+        """
+    ).fetchone()[0]
+    if mismatches:
+        raise InstanceTransientNullnessError(
+            f"instances has {mismatches} row(s) whose n_rows_transient nullness "
+            f"does not match event_types.has_transient"
+        )
+
+
+def _validate_instances_row_count_accounting(con: duckdb.DuckDBPyConnection) -> None:
+    mismatches = con.execute(
+        """
+        SELECT COUNT(*) FROM instances
+        WHERE n_rows_warmup_null
+            + n_rows_normal
+            + COALESCE(n_rows_transient, 0)
+            + n_rows_steady
+          <> n_rows
+        """
+    ).fetchone()[0]
+    if mismatches:
+        raise InstanceRowCountAccountingError(
+            f"instances has {mismatches} row(s) where the four n_rows_* "
+            f"sub-counts do not sum to n_rows"
         )

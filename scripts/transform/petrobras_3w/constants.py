@@ -16,3 +16,9 @@ PIN_GIT_TAG = "v.1.70.0"
 PIN_DATASET_VERSION = "2.0.0"
 
 UPSTREAM_DATASET_INI_RELPATH = "dataset/dataset.ini"
+
+# Public base URL where the dataset is served (Caddy → mounted parquet/ tree).
+# The Observations hive partition by `event_class` is fixed by ADR-0001, so
+# every Instance's published URL is fully determined here — `instances.parquet`
+# materialises this as `source_url` even before the Observations files exist.
+PUBLIC_BASE_URL = "https://dev-petrodb.ocortez.com/petrobras_3w"

@@ -34,7 +34,7 @@ from scripts.transform.petrobras_3w.constants import (
 from scripts.transform.petrobras_3w.upstream_stager import DatasetIni
 
 # Tables documented in this slice. Later slices append to this tuple.
-TABLE_ORDER = ("event_types",)
+TABLE_ORDER = ("event_types", "instances")
 
 TABLE_DESCRIPTIONS = {
     "event_types": (
@@ -45,19 +45,41 @@ TABLE_DESCRIPTIONS = {
         "NORMAL → TRANSIENT → STEADY arc semantics so consumers do not "
         "have to re-derive them from per-observation `class` codes."
     ),
+    "instances": (
+        "One row per upstream Instance file (~2,228 rows). Identifies the "
+        "Instance (`instance_id`), its provenance (`well_kind`, `well_id`, "
+        "`source_file`), the operational regime it is framed around "
+        "(`event_class`), and pre-aggregated per-Instance statistics "
+        "(`start_ts`, `end_ts`, `duration_s`, `n_rows`, plus four "
+        "`n_rows_*` counts that partition `n_rows` by `class` value). "
+        "Corpus-wide balance and labelled-mass queries can run purely "
+        "against this catalog without scanning the Observations time-series. "
+        "`source_url` points at the published Observations file for the "
+        "Instance (the URL pattern is fixed by ADR-0001)."
+    ),
 }
 
 PRIMARY_KEYS = {
     "event_types": ("event_class",),
+    "instances": ("instance_id",),
 }
 
-FOREIGN_KEYS: dict[str, tuple[dict, ...]] = {}
+FOREIGN_KEYS: dict[str, tuple[dict, ...]] = {
+    "instances": (
+        {
+            "column": "event_class",
+            "references_table": "event_types",
+            "references_column": "event_class",
+        },
+    ),
+}
 
 COLUMN_DESCRIPTIONS = {
     # event_types
     "event_class": (
         "Integer event class (0 = NORMAL; 1..9 = anomaly categories). "
-        "Primary key. Matches upstream's `LABEL`."
+        "On `event_types` this is the primary key; on `instances` it is "
+        "a foreign key back to `event_types.event_class`."
     ),
     "name": (
         "Internal name (PascalCase with underscores, e.g. "
@@ -83,6 +105,66 @@ COLUMN_DESCRIPTIONS = {
         "`true` when instances of this class include a `class = 0` "
         "(NORMAL) precursor before the labelled event. Correlates with "
         "`has_transient` — events 0, 3, 4 carry only the steady class."
+    ),
+    # instances
+    "instance_id": (
+        "Primary key. The upstream source filename without `.parquet` "
+        "(e.g. `WELL-00019_20120601165020`, `SIMULATED_00012`, "
+        "`DRAWN_00003`). Stable across refreshes."
+    ),
+    "well_kind": (
+        "Provenance of the Instance: `real` (from a physical Petrobras "
+        "well), `simulated` (synthetic, generated upstream), or `drawn` "
+        "(hand-crafted series). `well_id` is non-NULL only when "
+        "`well_kind = 'real'`."
+    ),
+    "well_id": (
+        "Anonymised physical-well integer ID parsed from the `WELL-NNNNN` "
+        "prefix of `instance_id`. NULL when `well_kind != 'real'`. Foreign "
+        "key to `wells.parquet` once that table lands in #21."
+    ),
+    "start_ts": ("First `timestamp` value in the upstream Instance file."),
+    "end_ts": ("Last `timestamp` value in the upstream Instance file."),
+    "duration_s": (
+        "`end_ts - start_ts` in seconds. Derived from the per-Instance "
+        "aggregates so consumers do not have to recompute it."
+    ),
+    "n_rows": (
+        "Number of 1-Hz observations in the upstream Instance file. "
+        "Range across the corpus: ~21k (~6h) to ~243k (~3 days)."
+    ),
+    "n_rows_warmup_null": (
+        "Count of rows where `class IS NULL` — the warmup prefix seen on "
+        "real-Well Instances (typically ~1 hour) where upstream chose not "
+        "to assign a label."
+    ),
+    "n_rows_normal": (
+        "Count of rows where `class = 0` and the Instance's `event_class` "
+        "is not itself 0 — i.e. the NORMAL precursor before an anomaly. "
+        "Event 0's `class = 0` rows are its labelled regime itself and "
+        "are counted under `n_rows_steady` instead, so the four "
+        "`n_rows_*` columns always partition `n_rows` without overlap."
+    ),
+    "n_rows_transient": (
+        "Count of rows where `class = event_class + 100` (the developing "
+        "phase before steady state). NULL when the row's `event_class` "
+        "has `has_transient = false` in `event_types` (events 0, 3, 4) — "
+        "the transient phase does not exist by design, distinct from a "
+        "zero-row count."
+    ),
+    "n_rows_steady": (
+        "Count of rows where `class = event_class` (the labelled "
+        "operational regime at steady state)."
+    ),
+    "source_file": (
+        "Upstream parquet filename including `.parquet` extension, for "
+        "cross-reference with the upstream repository."
+    ),
+    "source_url": (
+        "URL of the published Observations file for this Instance "
+        "(`observations/event_class=N/<instance_id>.parquet`). The URL "
+        "pattern is fixed by ADR-0001 so it can be materialised here "
+        "before the Observations files exist."
     ),
 }
 
@@ -294,12 +376,11 @@ def _write_readme(schemas: dict[str, dict], path: Path) -> None:
     lines.append("")
     lines.append(
         "Labelled 1-Hz sensor-data windows for the Petrobras 3W dataset, "
-        "republished as Parquet files. The full per-Instance time-series "
-        "(`observations/`), the Instance catalog (`instances.parquet`), "
-        "and the real-Well master (`wells.parquet`) ship in subsequent "
-        "issues (#22, #20, #21); this initial release publishes only the "
-        "event-class lookup (`event_types.parquet`) and the documentation "
-        "scaffolding so consumers can preview the schema."
+        "republished as Parquet files. This release publishes the "
+        "event-class lookup (`event_types.parquet`) and the full Instance "
+        "catalog (`instances.parquet`); the real-Well master "
+        "(`wells.parquet`) and the per-Instance Observations time-series "
+        "(`observations/`) ship in follow-up issues (#21, #22)."
     )
     lines.append("")
     lines.append("## Upstream pin")
@@ -320,6 +401,7 @@ def _write_readme(schemas: dict[str, dict], path: Path) -> None:
     lines.append("```")
     lines.append("petrobras_3w/")
     lines.append("├── event_types.parquet     # 10 rows, one per upstream event class")
+    lines.append("├── instances.parquet       # one row per upstream Instance file")
     lines.append("├── schema.md")
     lines.append("├── schema.json")
     lines.append("├── schema.sql")
@@ -360,6 +442,38 @@ def _write_readme(schemas: dict[str, dict], path: Path) -> None:
     lines.append(f"FROM '{base_url}/event_types.parquet'")
     lines.append("WHERE event_class > 0")
     lines.append("ORDER BY event_class;")
+    lines.append("```")
+    lines.append("")
+    lines.append("### Corpus balance from the Instance catalog")
+    lines.append("")
+    lines.append(
+        "The per-Instance `n_rows_*` counts let you measure the labelled "
+        "data balance across the corpus without scanning the Observations "
+        "time-series:"
+    )
+    lines.append("")
+    lines.append("```sql")
+    lines.append("SELECT")
+    lines.append("    et.event_class,")
+    lines.append("    et.description,")
+    lines.append("    COUNT(*)              AS n_instances,")
+    lines.append("    SUM(i.n_rows)         AS n_observations,")
+    lines.append("    SUM(i.n_rows_steady)  AS n_observations_steady")
+    lines.append(f"FROM '{base_url}/instances.parquet' i")
+    lines.append(f"JOIN '{base_url}/event_types.parquet' et")
+    lines.append("    ON et.event_class = i.event_class")
+    lines.append("GROUP BY et.event_class, et.description")
+    lines.append("ORDER BY et.event_class;")
+    lines.append("```")
+    lines.append("")
+    lines.append("### List Instances of a single event class (real wells only)")
+    lines.append("")
+    lines.append("```sql")
+    lines.append("SELECT instance_id, well_id, start_ts, n_rows, source_url")
+    lines.append(f"FROM '{base_url}/instances.parquet'")
+    lines.append("WHERE event_class = 8")
+    lines.append("  AND well_kind = 'real'")
+    lines.append("ORDER BY start_ts;")
     lines.append("```")
     lines.append("")
     lines.append("## License")

@@ -45,6 +45,7 @@ def run(
     with duckdb.connect(str(db_path), read_only=True) as con:
         validator.validate(con, dataset_ini)
         parquet_writer.write_event_types(con, output_dir)
+        parquet_writer.write_instances(con, output_dir)
         schema_doc_generator.generate(con, output_dir, dataset_ini)
 
     if website_root is not None:
