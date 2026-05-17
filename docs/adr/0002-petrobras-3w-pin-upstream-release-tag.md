@@ -8,7 +8,9 @@ Petrobras 3W uses semantic versioning (`VERSIONING.md` upstream). Past minor rel
 
 ## Decision
 
-The Petrobras 3W pipeline reads from a pinned upstream release tag (currently `v2.0.0`). Refreshes are event-driven (when upstream cuts a new tag and we've reviewed the release notes), not calendar-driven. The current pinned tag is recorded in `parquet/petrobras_3w/README.md` and emitted in the pipeline's validation logs.
+The Petrobras 3W pipeline reads from a pinned upstream git tag that ships a specific upstream *dataset version*. The currently pinned git tag is `v.1.70.0`, which ships dataset version `2.0.0`. Refreshes are event-driven (when upstream cuts a new git tag — typically corresponding to a new dataset version — and we've reviewed the release notes), not calendar-driven. The current pinned git tag and dataset version are recorded in `parquet/petrobras_3w/README.md` and emitted in the pipeline's validation logs.
+
+Note on upstream versioning: upstream uses two distinct version namespaces. Git tags are formatted `v.1.NN.0` (with the dot after `v`); these are the only mechanism a clone can pin to. The *dataset* itself carries a separate semver in `dataset/README.md` (`1.0.0`, `1.1.0`, `1.1.1`, `2.0.0`, …) — this is the version that identifies the data shape and content. The dataset version is what consumers care about; the git tag is the pinning mechanism that delivers it byte-stably. A single dataset version is typically shipped by many consecutive git tags (toolkit/docs fixes don't bump the dataset); for stability we pin to the latest available git tag for the chosen dataset version.
 
 ## Considered alternatives
 
