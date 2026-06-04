@@ -53,6 +53,43 @@ four-bucket rationale, and three more canonical query patterns live in
 
 <!-- argentina:end -->
 
+<!-- petrobras_3w:begin -->
+
+### Petrobras 3W Dataset
+Labelled 1-Hz sensor-data windows from the Petrobras 3W dataset, sliced
+into per-Instance Parquet files. Pinned at upstream git tag `v.1.70.0`
+(dataset version `2.0.0`). This release publishes the
+event-class lookup, the real-Well master, the full Instance catalog, and
+the per-Instance Observations time-series (hive-partitioned by event class).
+
+Measure the labelled-data balance across the corpus from the catalog alone
+(no Observations scan needed):
+
+```python
+import duckdb
+
+base = 'https://dev-petrodb.ocortez.com/petrobras_3w'
+result = duckdb.sql(f"""
+    SELECT
+        et.event_class,
+        et.description,
+        COUNT(*)             AS n_instances,
+        SUM(i.n_rows)        AS n_observations
+    FROM '{base}/instances.parquet' i
+    JOIN '{base}/event_types.parquet' et
+        ON et.event_class = i.event_class
+    GROUP BY et.event_class, et.description
+    ORDER BY et.event_class
+""").df()
+```
+
+Full per-column English docs (including the 27-sensor glossary mirrored
+from upstream `dataset.ini`) live in
+[`parquet/petrobras_3w/README.md`](parquet/petrobras_3w/README.md). Upstream
+source: <https://github.com/petrobras/3W.git> (CC BY 4.0).
+
+<!-- petrobras_3w:end -->
+
 ## Access Data
 
 Browse and download files at: **https://dev-petrodb.ocortez.com**

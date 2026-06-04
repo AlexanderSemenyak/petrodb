@@ -210,6 +210,11 @@ __marimo__/
 .duckdb/
 database/argentina.duckdb
 database/argentina.duckdb.wal
+database/petrobras_3w.duckdb
+database/petrobras_3w.duckdb.wal
+
+# Petrobras 3W upstream shallow clone (see ADR-0002 for the pin policy)
+data/petrobras_3w/
 
 # Tool cache/config directories (from container)
 .config/
@@ -220,3 +225,9 @@ database/argentina.duckdb.wal
 .DS_Store
 .gemini/
 data/Argentina
+
+# Petrobras 3W published tree — regenerated in CI on every deploy
+# (see .github/workflows/deploy-cloudflare-pages.yml). The pipeline output
+# (catalogs, hive-partitioned Observations, manifest, schema docs, README,
+# license mirror) is never committed; other datasets remain tracked.
+parquet/petrobras_3w/
