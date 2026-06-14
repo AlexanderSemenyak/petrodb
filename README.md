@@ -1,3 +1,4 @@
+origin: https://github.com/oskrgab/petrodb
 # PetroData Repository
 
 Open petroleum datasets in Parquet format for data science and machine learning applications.
